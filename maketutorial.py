@@ -12,6 +12,29 @@ import nbformat
 
 
 VERBOSE = False
+MODE_TAG = 1
+MODE_INLINE = 2
+
+
+inline_tag_re = re.compile(r'^(###|\%\%\%) (.*)')
+
+qfilter_re = [
+    (re.compile(r'=.*(\s[#%].+)\s*##deval'), r'= ... \t\1'),
+    (re.compile(r'=.*\s*##deval'), r'= ...'),
+    (re.compile(r'eqn.? [\d.]+(.*)\s*##deeqn'), r'\1'),
+    (re.compile(r'return .*(\s[#%].*?)\s*##deret'), r'return ... \t\1'),
+    (re.compile(r'return .*##deret'), r'return ...'),
+    (re.compile(r'(\s*).+##repl[ \t]?([^\n]+)'), r'\1\2'),
+    (re.compile(r'.+##repl[ \t]*'), r''),
+    (re.compile(r'\s+#\s*$', re.MULTILINE), r''),
+]
+
+afilter_re = [
+    (re.compile('\s*##deval'), ''),
+    (re.compile('\s*##deeqn'), ''),
+    (re.compile('\s*##deret'), ''),
+    (re.compile('\s*##repl.*'), ''),
+]
 
 
 def find_output_dir(pattern):
@@ -26,13 +49,23 @@ def find_output_dir(pattern):
     os.mkdir(dirname)
     return dirname
 
+def cell_first_line(cell):
+    lines = cell['source']
+    if not lines:
+        return None
+    return lines.splitlines()[0]
 
-def clear_tags(cells):
+def clear_tags(cells, mode):
     """ filter out special tutorial tags from the cells """
     bad_tags = ('answer', 'clear', 'template', 'omit')
 
-    for cell, tags in tagged_cells(cells):
-        cell['metadata']['tags'] = [tag for tag in tags if tag not in bad_tags]
+    for cell, tags in tagged_cells(cells, mode):
+        if mode == MODE_TAG:
+            cell['metadata']['tags'] = [tag for tag in tags if tag not in bad_tags]
+        elif mode == MODE_INLINE:
+            line = cell_first_line(cell)
+            if line:
+                cell['source'] = "".join(cell['source'].splitlines(True)[1:])
 
 
 def _filter_source(filters, source):
@@ -48,60 +81,66 @@ def _filter_source(filters, source):
     return source
 
 
-qfilter_re = [
-    (re.compile(r'=.*(\s[#%].+)\s*##deval'), r'= ... \t\1'),
-    (re.compile(r'=.*\s*##deval'), r'= ...'),
-    (re.compile(r'eqn.? [\d.]+(.*)\s*##deeqn'), r'\1'),
-    (re.compile(r'return .*(\s[#%].*?)\s*##deret'), r'return ... \t\1'),
-    (re.compile(r'return .*##deret'), r'return ...'),
-    (re.compile(r'(\s*).+##repl[ \t]?([^\n]+)'), r'\1\2'),
-    (re.compile(r'.+##repl[ \t]*'), r''),
-    (re.compile(r'\s+#\s*$', re.MULTILINE), r''),
-]
-
-
 def filter_source_q(source):
     return _filter_source(qfilter_re, source)
-
-
-afilter_re = [
-    (re.compile('\s*##deval'), ''),
-    (re.compile('\s*##deeqn'), ''),
-    (re.compile('\s*##deret'), ''),
-    (re.compile('\s*##repl.*'), ''),
-]
 
 
 def filter_source_a(source):
     return _filter_source(afilter_re, source)
 
 
-def has_tags(cell):
+def has_tags(cell, mode):
     """ determine whether the cell has any tags """
-    return 'metadata' in cell and 'tags' in cell['metadata']
+    if mode == MODE_TAG:
+        return 'metadata' in cell and 'tags' in cell['metadata']
+
+    if mode == MODE_INLINE:
+        line = cell_first_line(cell)
+        return line and inline_tag_re.match(line)
 
 
-def get_tags(cell):
+    raise ValueError("Unknown mode: %s" % mode)
+
+
+def get_tags(cell, mode):
     """ get the tags list for a cell """
-    return cell['metadata']['tags'] if has_tags(cell) else []
+    if mode == MODE_TAG:
+        return cell['metadata']['tags'] if has_tags(cell, mode) else []
+
+    if mode == MODE_INLINE:
+        line = cell_first_line(cell)
+        if line:
+            m = inline_tag_re.match(line)
+            if m:
+                tags = m.group(2).split()
+                if VERBOSE:
+                    print(tags)
+                return tags
+        return []
+
+    raise ValueError("Unknown mode: %s" % mode)
 
 
-def tagged_cells(cells):
+def tagged_cells(cells, mode):
     """ iterator to return all cells that have tags """
     for cell in cells:
-        if has_tags(cell):
-            yield cell, get_tags(cell)
+        if has_tags(cell, mode):
+            yield cell, get_tags(cell, mode)
 
 
-def filter_omitted_cells(cells):
-    return [c for c in cells if 'omit' not in get_tags(c)]
+def filter_omitted_cells(cells, mode):
+    return [c for c in cells if 'omit' not in get_tags(c, mode)]
 
 
-def make_question_sheet(infile, outfile):
+def clean_whitespace(cell):
+    cell['source'] = "\n".join(s.rstrip() for s in cell['source'].splitlines())
+
+
+def make_question_sheet(infile, outfile, mode):
     """ make the question sheet """
     with open(infile, 'r') as infh, open(outfile, 'w') as outfh:
         nb = nbformat.read(infh, nbformat.NO_CONVERT)
-        for cell, tags in tagged_cells(nb.cells):
+        for cell, tags in tagged_cells(nb.cells, mode):
             is_code = cell['cell_type'] != 'markdown'
 
             if 'answer' in tags:
@@ -122,29 +161,60 @@ def make_question_sheet(infile, outfile):
 
             if is_code:
                 cell['execution_count'] = None
-
-        nb.cells = filter_omitted_cells(nb.cells)
-        clear_tags(nb.cells)
+            clean_whitespace(cell)
+        nb.cells = filter_omitted_cells(nb.cells, mode)
+        clear_tags(nb.cells, mode)
         nbformat.write(nb, outfh, nbformat.NO_CONVERT)
 
     nbformat.validate(nbformat.read(open(outfile), nbformat.NO_CONVERT))
 
 
-def make_answer_sheet(infile, outfile):
+def make_answer_sheet(infile, outfile, mode):
     """ make the worked answers sheet """
     with open(infile, 'r') as infh, open(outfile, 'w') as outfh:
         nb = nbformat.read(infh, nbformat.NO_CONVERT)
-        for cell, tags in tagged_cells(nb.cells):
+        for cell, tags in tagged_cells(nb.cells, mode):
             if 'answer' in tags:
                 if 'template' in tags:
                     # process the source to elide some details
                     # particularly the markup for filtering
                     cell['source'] = filter_source_a(cell['source'])
+            clean_whitespace(cell)
 
-        clear_tags(nb.cells)
+        clear_tags(nb.cells, mode)
         nbformat.write(nb, outfh, nbformat.NO_CONVERT)
 
     nbformat.validate(nbformat.read(open(outfile), nbformat.NO_CONVERT))
+
+
+def convert_from_tags(infile, outfile):
+    """ convert metadata tags to inline tags """
+    with open(infile, 'r') as infh, open(outfile, 'w') as outfh:
+        nb = nbformat.read(infh, nbformat.NO_CONVERT)
+        for cell, tags in tagged_cells(nb.cells, MODE_TAG):
+            is_code = cell['cell_type'] != 'markdown'
+            fmt = "### %s\n%s" if is_code else "%%%%%% %s\n\n%s"
+            if tags:
+                cell['source'] = fmt % (
+                    " ".join(tags),
+                    cell['source']
+                )
+            clean_whitespace(cell)
+
+        clear_tags(nb.cells, MODE_TAG)
+        nbformat.write(nb, outfh, nbformat.NO_CONVERT)
+
+    nbformat.validate(nbformat.read(open(outfile), nbformat.NO_CONVERT))
+
+
+def is_conversion_needed(infile):
+    """ figure out of the file needs converting first """
+    with open(infile, 'r') as infh:
+        nb = nbformat.read(infh, nbformat.NO_CONVERT)
+        for cell, tags in tagged_cells(nb.cells, MODE_TAG):
+            if tags and 'answer' in tags:
+                return True
+    return False
 
 
 if __name__ == '__main__':
@@ -157,6 +227,14 @@ if __name__ == '__main__':
 
     infile = sys.argv[1]
 
+    convert = is_conversion_needed(infile)
+
+    if convert:
+        print("Converting from tags to inline markers")
+        backupfile = '%s.bak' % infile
+        os.rename(infile, backupfile)
+        convert_from_tags(backupfile, infile)
+
     # Work out the supersecret paths to obfuscate the file location
     qdir = find_output_dir('questions-%s')
     adir = find_output_dir('answers-%s')
@@ -165,5 +243,7 @@ if __name__ == '__main__':
     outfile_q = os.path.join(qdir, "%s-questions%s" % (outfile, outext))
     outfile_a = os.path.join(adir, "%s-answers%s" % (outfile, outext))
 
-    make_question_sheet(infile, outfile_q)
-    make_answer_sheet(infile, outfile_a)
+    mode = MODE_INLINE
+
+    make_question_sheet(infile, outfile_q, mode)
+    make_answer_sheet(infile, outfile_a, mode)
