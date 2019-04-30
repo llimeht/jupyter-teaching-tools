@@ -16,9 +16,9 @@ MODE_TAG = 1
 MODE_INLINE = 2
 
 
-inline_tag_re = re.compile(r'^(###|\%\%\%) (.*)')
+INLINE_TAG_RE = re.compile(r'^(###|\%\%\%) (.*)')
 
-qfilter_re = [
+QFILTER_RE = [
     (re.compile(r'=.*(\s[#%].+)\s*##deval'), r'= ... \t\1'),
     (re.compile(r'=.*\s*##deval'), r'= ...'),
     (re.compile(r'eqn.? [\d.]+(.*)\s*##deeqn'), r'\1'),
@@ -29,11 +29,11 @@ qfilter_re = [
     (re.compile(r'\s+#\s*$', re.MULTILINE), r''),
 ]
 
-afilter_re = [
-    (re.compile('\s*##deval'), ''),
-    (re.compile('\s*##deeqn'), ''),
-    (re.compile('\s*##deret'), ''),
-    (re.compile('\s*##repl.*'), ''),
+AFILTER_RE = [
+    (re.compile(r'\s*##deval'), ''),
+    (re.compile(r'\s*##deeqn'), ''),
+    (re.compile(r'\s*##deret'), ''),
+    (re.compile(r'\s*##repl.*'), ''),
 ]
 
 
@@ -82,11 +82,11 @@ def _filter_source(filters, source):
 
 
 def filter_source_q(source):
-    return _filter_source(qfilter_re, source)
+    return _filter_source(QFILTER_RE, source)
 
 
 def filter_source_a(source):
-    return _filter_source(afilter_re, source)
+    return _filter_source(AFILTER_RE, source)
 
 
 def has_tags(cell, mode):
@@ -96,7 +96,7 @@ def has_tags(cell, mode):
 
     if mode == MODE_INLINE:
         line = cell_first_line(cell)
-        return line and inline_tag_re.match(line)
+        return line and INLINE_TAG_RE.match(line)
 
 
     raise ValueError("Unknown mode: %s" % mode)
@@ -110,9 +110,9 @@ def get_tags(cell, mode):
     if mode == MODE_INLINE:
         line = cell_first_line(cell)
         if line:
-            m = inline_tag_re.match(line)
-            if m:
-                tags = m.group(2).split()
+            match = INLINE_TAG_RE.match(line)
+            if match:
+                tags = match.group(2).split()
                 if VERBOSE:
                     print(tags)
                 return tags
@@ -139,8 +139,8 @@ def clean_whitespace(cell):
 def make_question_sheet(infile, outfile, mode):
     """ make the question sheet """
     with open(infile, 'r') as infh, open(outfile, 'w') as outfh:
-        nb = nbformat.read(infh, nbformat.NO_CONVERT)
-        for cell, tags in tagged_cells(nb.cells, mode):
+        notebook = nbformat.read(infh, nbformat.NO_CONVERT)
+        for cell, tags in tagged_cells(notebook.cells, mode):
             is_code = cell['cell_type'] != 'markdown'
 
             if 'answer' in tags:
@@ -162,9 +162,9 @@ def make_question_sheet(infile, outfile, mode):
             if is_code:
                 cell['execution_count'] = None
             clean_whitespace(cell)
-        nb.cells = filter_omitted_cells(nb.cells, mode)
-        clear_tags(nb.cells, mode)
-        nbformat.write(nb, outfh, nbformat.NO_CONVERT)
+        notebook.cells = filter_omitted_cells(notebook.cells, mode)
+        clear_tags(notebook.cells, mode)
+        nbformat.write(notebook, outfh, nbformat.NO_CONVERT)
 
     nbformat.validate(nbformat.read(open(outfile), nbformat.NO_CONVERT))
 
@@ -172,8 +172,8 @@ def make_question_sheet(infile, outfile, mode):
 def make_answer_sheet(infile, outfile, mode):
     """ make the worked answers sheet """
     with open(infile, 'r') as infh, open(outfile, 'w') as outfh:
-        nb = nbformat.read(infh, nbformat.NO_CONVERT)
-        for cell, tags in tagged_cells(nb.cells, mode):
+        notebook = nbformat.read(infh, nbformat.NO_CONVERT)
+        for cell, tags in tagged_cells(notebook.cells, mode):
             if 'answer' in tags:
                 if 'template' in tags:
                     # process the source to elide some details
@@ -181,17 +181,18 @@ def make_answer_sheet(infile, outfile, mode):
                     cell['source'] = filter_source_a(cell['source'])
             clean_whitespace(cell)
 
-        clear_tags(nb.cells, mode)
-        nbformat.write(nb, outfh, nbformat.NO_CONVERT)
+        clear_tags(notebook.cells, mode)
+        nbformat.write(notebook, outfh, nbformat.NO_CONVERT)
 
     nbformat.validate(nbformat.read(open(outfile), nbformat.NO_CONVERT))
+    return True
 
 
 def convert_from_tags(infile, outfile):
     """ convert metadata tags to inline tags """
     with open(infile, 'r') as infh, open(outfile, 'w') as outfh:
-        nb = nbformat.read(infh, nbformat.NO_CONVERT)
-        for cell, tags in tagged_cells(nb.cells, MODE_TAG):
+        notebook = nbformat.read(infh, nbformat.NO_CONVERT)
+        for cell, tags in tagged_cells(notebook.cells, MODE_TAG):
             is_code = cell['cell_type'] != 'markdown'
             fmt = "### %s\n%s" if is_code else "%%%%%% %s\n\n%s"
             if tags:
@@ -201,8 +202,8 @@ def convert_from_tags(infile, outfile):
                 )
             clean_whitespace(cell)
 
-        clear_tags(nb.cells, MODE_TAG)
-        nbformat.write(nb, outfh, nbformat.NO_CONVERT)
+        clear_tags(notebook.cells, MODE_TAG)
+        nbformat.write(notebook, outfh, nbformat.NO_CONVERT)
 
     nbformat.validate(nbformat.read(open(outfile), nbformat.NO_CONVERT))
 
@@ -210,23 +211,14 @@ def convert_from_tags(infile, outfile):
 def is_conversion_needed(infile):
     """ figure out of the file needs converting first """
     with open(infile, 'r') as infh:
-        nb = nbformat.read(infh, nbformat.NO_CONVERT)
-        for cell, tags in tagged_cells(nb.cells, MODE_TAG):
+        notebook = nbformat.read(infh, nbformat.NO_CONVERT)
+        for cell, tags in tagged_cells(notebook.cells, MODE_TAG):
             if tags and 'answer' in tags:
                 return True
     return False
 
 
-if __name__ == '__main__':
-
-    VERBOSE = False
-
-    if len(sys.argv) < 2:
-        print("Usage: %s filename" % sys.argv[0])
-        sys.exit(1)
-
-    infile = sys.argv[1]
-
+def process_filename(infile):
     convert = is_conversion_needed(infile)
 
     if convert:
@@ -243,7 +235,18 @@ if __name__ == '__main__':
     outfile_q = os.path.join(qdir, "%s-questions%s" % (outfile, outext))
     outfile_a = os.path.join(adir, "%s-answers%s" % (outfile, outext))
 
-    mode = MODE_INLINE
+    tagmode = MODE_INLINE
 
-    make_question_sheet(infile, outfile_q, mode)
-    make_answer_sheet(infile, outfile_a, mode)
+    make_question_sheet(infile, outfile_q, tagmode)
+    make_answer_sheet(infile, outfile_a, tagmode)
+
+
+if __name__ == '__main__':
+
+    VERBOSE = False
+
+    if len(sys.argv) < 2:
+        print("Usage: %s filename" % sys.argv[0])
+        sys.exit(1)
+
+    sys.exit(not process_filename(sys.argv[1]))
