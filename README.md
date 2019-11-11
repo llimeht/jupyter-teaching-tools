@@ -124,9 +124,9 @@ tagging are automatically converted to comment-based tagging by
 to a suitable location, such as `/usr/local/bin/` or the top-level folder
 of a set of course tutorials. There is also a `setup.py` script provided:
 
-    ```bash
+```bash
     python setup.py install
-    ```
+```
 
 The Python module `nbformat` is required; this module is part of the Jupyter
 suite.
