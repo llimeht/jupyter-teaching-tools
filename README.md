@@ -15,19 +15,36 @@ The tools currently available in the repository are:
   and an *answers* sheet.
 
 
-## maketutorial:
+## maketutorial: template-generated Question and Answer sheets
 
 The philosophy behind this tool is that the instructor should only have
 information in one place: a tutorial *template* from which the *question*
 and *answer* sheets are generated. Altering a question or fixing an answer
 should only ever be done in the template file and then the children notebooks
-regenerated.
+can be regenerated.
 
-Tags are added to the notebook metadata either by editing the JSON file in a
-text editor or through the Jupyter editor. At present, only `code` cells are
-altered, Markdown cells are passed through unchanged.
+### Concept of maketutorial
 
-The tags that are understood are:
+* cells to be processed have specially formatted comments added to them to
+  indicate what sort of processing should be done
+* some lines within `template` type cells can be manipulated using specially
+  formatted comments on the relevant line
+* `maketutorial` is run in *questions* mode to generate the question sheet
+  and then in *answers* mode to generate the solutions.
+* the separate questions and answers output notebooks are published to the
+  students as required.
+
+### Details
+
+The cells in the Jupyter notebook are tagged using specially formatted
+comments within the cell contents. Both code cells and Markdown cells
+can be decorated in this way, although more processing options are available
+for code cells.
+The special comments to tag a cell must be in the first line of text of the
+cell and start either with `###` or `%%%` for use in Python, Octave and
+Markdown cells.
+
+The cell-level tags that are understood are:
 
 * `answer`: the cell is an answer cell. Its output should be cleared from the
   *questions* version and further tags should be used to determine how to
@@ -36,25 +53,28 @@ The tags that are understood are:
   in-code comments listed below.
 * `omit`: the cell should be completely omitted from the *answers* output.
 
-The replacements in `template` cells are applied in *questions* mode as described
-below. In *answers* mode, the replacement code is simply deleted.
+In `template` mode,  textual replacements may be made on each line of the cell
+to manipulate the contents of the cell, for instance to redact parts of the
+answer (leaving hints behind).
+The replacements in `template` cells are only applied when the program is run
+in *questions* mode; in *answers* mode, the replacement code is simply deleted.
 
 * `##deval`: removes the value that will be set to a variable, leaving an ellipsis to indicate that something is missing
     ```python
     v = 20.0                                 ##deval
     w = 10.0      # comment is preserved     ##deval
     ```
-    becomes
+    becomes in *questions* mode
     ```python
     v = ...
     w = ...       # comment is preserved
     ```
 
-* `##deeqn`: remove a comment to see a particular equation from the notes
+* `##deeqn`: remove a cross-reference to an equation in the course notes
     ```python
     y = m * x + b        # use the gradient, eqn 3.2          ##deval ##deeqn
     ```
-    becomes
+    becomes in *questions* mode
     ```python
     y = ...              # use the gradient,
     ```
@@ -64,18 +84,18 @@ below. In *answers* mode, the replacement code is simply deleted.
     def dxdt(x):
         return A.dot(x)                      ##deret
     ```
-    becomes
+    becomes in *questions* mode
     ```python
     def dxdt(x):
         return ...
     ```
 
-* `##repl`: replaces the beginning of line with what follows, for use when
-  syntax doesn't let you just chop a line up as with the other tags.
+* `##repl`: replaces the beginning of line with the text that follows, for
+  use when syntax doesn't let you just chop a line up as with the other tags.
     ```python
     T = odeint(dTdt, T0, t, hmax=0.01/f)               ##repl T = odeint(... ... , hmax=0.01/f)
     ```
-    becomes
+    becomes in *questions* mode
     ```python
     T = odeint(... ... , hmax=0.01/f)
     ```
@@ -87,3 +107,26 @@ Usage:
 ```
     maketutorial tutorial1.ipynb
 ```
+
+### Notes
+
+A previous version of the `maketutorial` tool used tag metadata within the
+Jupyter notebook for the tagging. This is a technically superior interface
+but editing the tags and visibility of the tags was sufficiently difficult
+that it was found not to be a good option. Notebooks with metadata-based
+tagging are automatically converted to comment-based tagging by
+`maketutorial`.
+
+
+## Installation
+
+`maketutorial` is a simple, self-contained Python script and can be copied
+to a suitable location, such as `/usr/local/bin/` or the top-level folder
+of a set of course tutorials. There is also a `setup.py` script provided:
+
+    ```bash
+    python setup.py install
+    ```
+
+The Python module `nbformat` is required; this module is part of the Jupyter
+suite.
